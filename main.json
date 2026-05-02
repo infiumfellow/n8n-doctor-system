@@ -2,6 +2,53 @@
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "773e65bf-050f-4aa6-9e7e-325d29e32d27",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -496,
+        400
+      ],
+      "webhookId": "59be8dde-6a78-4be5-8630-ff8a86d334dc"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -240,
+        224
+      ],
+      "id": "43b95d5d-1b6c-49bd-8724-4316e9071089",
+      "name": "Respond OK"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nif (!body?.entry?.[0]?.changes?.[0]?.value?.messages) return [];\n\nconst value   = body.entry[0].changes[0].value;\nconst msg     = value.messages[0];\nconst phone   = msg.from;\nconst phoneId = value.metadata.phone_number_id;\nconst profile = value.contacts?.[0]?.profile?.name || 'Patient';\nconst msgType = msg.type;\nconst msgId   = msg.id;\nconst timestamp = msg.timestamp;\n\nconst data = $getWorkflowStaticData('global');\nif (!data.processed) data.processed = {};\nconst oneHourAgo = Date.now() - 3600000;\nObject.keys(data.processed).filter(k => data.processed[k] < oneHourAgo).forEach(k => delete data.processed[k]);\nif (data.processed[msgId]) return [];\ndata.processed[msgId] = Date.now();\n\nif (!data.rateLimit) data.rateLimit = {};\nconst now = Date.now();\nif (now - (data.rateLimit[phone] || 0) < 1500) return [];\ndata.rateLimit[phone] = now;\n\nlet userText = '';\nlet buttonId = null;\nlet rawInteractiveType = null;\n\nswitch (msgType) {\n  case 'text':\n    userText = msg.text.body.trim();\n    break;\n  case 'interactive': {\n    rawInteractiveType = msg.interactive.type;\n    if (rawInteractiveType === 'button_reply') {\n      buttonId = msg.interactive.button_reply.id;\n      userText = msg.interactive.button_reply.title;\n    } else if (rawInteractiveType === 'list_reply') {\n      buttonId = msg.interactive.list_reply.id;\n      userText = msg.interactive.list_reply.title;\n    }\n    break;\n  }\n  case 'location': {\n    const loc = msg.location;\n    userText = `LOCATION: lat=${loc.latitude}, lng=${loc.longitude}`;\n    if (loc.name) userText += `, name=${loc.name}`;\n    break;\n  }\n  default:\n    userText = `[${msgType} message received]`;\n}\n\nif (!userText) return [];\nreturn [{ json: { phone, phoneId, profile, msgType, rawInteractiveType, userText, buttonId, msgId, timestamp } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        400
+      ],
+      "id": "40b48443-1b1f-4498-a945-362f4df48c17",
+      "name": "Ingest Message"
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/conversation_messages",
         "sendHeaders": true,
@@ -33,112 +80,16 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        -144,
-        1248
+        -16,
+        400
       ],
-      "id": "2086f291-230b-4387-ac7c-82d89ebd25d2",
-      "name": "Save User Message"
+      "id": "b9345a67-492b-4feb-9856-5bafcd4f6209",
+      "name": "Save User Message",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "toolDescription": "get_specialties: Returns the full list of available medical specialties with IDs, labels, emojis, and symptom keywords. Always call this when a user mentions any symptom or medical condition to pick the correct spec_id.",
-        "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/specialties?is_active=eq.true&order=sort_order.asc",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.4,
-      "position": [
-        576,
-        1632
-      ],
-      "id": "fcf876cf-3297-44e1-94d6-3efec94175a7",
-      "name": "get specialties",
-      "credentials": {
-        "supabaseApi": {
-          "id": "3YH2ieK8pl9hK7aT",
-          "name": "Supabase account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "toolDescription": "reschedule_booking: Reschedules an existing confirmed or pending booking to a new slot. Updates the slot_id, slot_display, slot_date and sets status back to pending. Matches by booking_ref AND patient phone for security.",
-        "method": "PATCH",
-        "url": "={{ 'https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/bookings?booking_ref=eq.' + $fromAI('booking_ref', 'Booking reference e.g. LYN100001') + '&phone=eq.' + $('Ingest Message1').first().json.phone + '&status=in.(confirmed,pending)' }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  slot_id: $fromAI('new_slot_id', 'New slot ID from get_slots'),\n  slot_display: $fromAI('new_slot_display', 'New display time e.g. 10:00 - 10:30 AM'),\n  slot_date: $fromAI('new_slot_date', 'New date YYYY-MM-DD'),\n  status: 'pending',\n  updated_at: new Date().toISOString()\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.4,
-      "position": [
-        1408,
-        1632
-      ],
-      "id": "b226c7a7-f9f1-47b0-b887-5c6eaebd58f4",
-      "name": "reschedule booking",
-      "credentials": {
-        "supabaseApi": {
-          "id": "3YH2ieK8pl9hK7aT",
-          "name": "Supabase account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "whatsapp-webhook",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "id": "64187f80-e09e-440a-af34-dc66313bd366",
-      "name": "Webhook POST (Incoming Messages)1",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
-      "position": [
-        -624,
-        1248
-      ],
-      "webhookId": "59be8dde-6a78-4be5-8630-ff8a86d334dc"
-    },
-    {
-      "parameters": {
-        "respondWith": "text",
-        "responseBody": "OK",
-        "options": {
-          "responseCode": 200
-        }
-      },
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.5,
-      "position": [
-        -368,
-        1072
-      ],
-      "id": "3de765d5-c8ab-4543-9c75-9e04cd8ba89d",
-      "name": "Respond1"
-    },
-    {
-      "parameters": {
-        "jsCode": "// ═══════════════════════════════════════════\n// INGEST MESSAGE v4\n// Handles: deduplication, rate limiting, parsing\n// ═══════════════════════════════════════════\n\nconst body = $input.first().json.body;\n\n// Guard: only process if messages exist\nif (!body?.entry?.[0]?.changes?.[0]?.value?.messages) return [];\n\nconst value   = body.entry[0].changes[0].value;\nconst msg     = value.messages[0];\nconst phone   = msg.from;  // This is the patient's WhatsApp number\nconst phoneId = value.metadata.phone_number_id;\nconst profile = value.contacts?.[0]?.profile?.name || 'Patient';\nconst msgType = msg.type;\nconst msgId   = msg.id;\nconst timestamp = msg.timestamp;\n\n// ── Global state ──────────────────────────\nconst data = $getWorkflowStaticData('global');\n\n// ── Deduplication ─────────────────────────\nif (!data.processed) data.processed = {};\n\n// Cleanup: remove entries older than 1 hour to prevent memory bloat\nconst oneHourAgo = Date.now() - 3600000;\nconst procKeys = Object.keys(data.processed);\nif (procKeys.length > 500) {\n  procKeys\n    .filter(k => data.processed[k] < oneHourAgo)\n    .forEach(k => delete data.processed[k]);\n}\n\nif (data.processed[msgId]) {\n  return []; // exact duplicate — already processed\n}\ndata.processed[msgId] = Date.now();\n\n// ── Rate limiting ─────────────────────────\n// 1 message per 1.5 seconds per user\nif (!data.rateLimit) data.rateLimit = {};\nconst now = Date.now();\nconst lastMsg = data.rateLimit[phone] || 0;\nif (now - lastMsg < 1500) {\n  return []; // too fast — ignore\n}\ndata.rateLimit[phone] = now;\n\n// ── Parse message content ─────────────────\nlet userText = '';\nlet buttonId = null;\nlet rawInteractiveType = null;\n\nswitch (msgType) {\n  case 'text':\n    userText = msg.text.body.trim();\n    break;\n\n  case 'interactive': {\n    rawInteractiveType = msg.interactive.type;\n    if (rawInteractiveType === 'button_reply') {\n      buttonId = msg.interactive.button_reply.id;\n      userText = msg.interactive.button_reply.title;\n    } else if (rawInteractiveType === 'list_reply') {\n      buttonId = msg.interactive.list_reply.id;\n      userText = msg.interactive.list_reply.title;\n    }\n    break;\n  }\n\n  case 'location':\n    // Handle location sharing\n    const loc = msg.location;\n    userText = `LOCATION: lat=${loc.latitude}, lng=${loc.longitude}`;\n    if (loc.name) userText += `, name=${loc.name}`;\n    break;\n\n  default:\n    // Unsupported type — still pass through so AI can respond gracefully\n    userText = `[${msgType} message received]`;\n}\n\nif (!userText) return [];\n\nreturn [{ json: {\n  phone,\n  phoneId,\n  profile,\n  msgType,\n  rawInteractiveType,\n  userText,\n  buttonId,\n  msgId,\n  timestamp\n}}];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -368,
-        1248
-      ],
-      "id": "abc673f5-9ee9-4495-9e71-d4258042875a",
-      "name": "Ingest Message1"
-    },
-    {
-      "parameters": {
-        "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/session_state?phone=eq.{{ $('Ingest Message1').first().json.phone }}&limit=1",
+        "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/session_state?phone=eq.{{ $('Ingest Message').first().json.phone }}&limit=1",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -161,15 +112,16 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        48,
-        1248
+        176,
+        400
       ],
-      "id": "074cc62d-ec5c-4f10-b044-8a4983aed0b1",
-      "name": "Load Session1"
+      "id": "e785b248-8ad4-43b9-848b-d2182a5f5ebc",
+      "name": "Load Session",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/v_recent_conversation?phone=eq.{{ $('Ingest Message1').first().json.phone }}&order=created_at.asc&limit=12",
+        "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/conversation_messages?phone=eq.{{ $('Ingest Message').first().json.phone }}&order=created_at.desc&limit=12",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -192,43 +144,44 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        256,
-        1248
+        384,
+        400
       ],
-      "id": "fd98caff-a5ed-44e7-bd3b-087e0bb2e0a6",
-      "name": "Load Convo1"
+      "id": "29e9b160-d459-44f9-9705-dec789c249aa",
+      "name": "Load Convo",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "// ═══════════════════════════════════════════\n// CONTEXT BUILDER v4.1\n// Builds structured prompt for Gemini\n// ═══════════════════════════════════════════\n\nconst ing = $('Ingest Message1').first().json;\nconst { phone, phoneId, profile, userText, buttonId, msgType, rawInteractiveType, msgId, timestamp } = ing;\n\n// ── Session ────────────────────────────────\nconst sessionItems = $('Load Session1').all().map(i => i.json);\nconst session = (sessionItems.length > 0 && sessionItems[0].phone)\n  ? sessionItems[0]\n  : { booking_draft: {}, last_intent: 'none', message_count: 0 };\n\n// ── Conversation history ───────────────────\nconst convItems = $('Load Convo1').all().map(i => i.json);\nconst history = convItems\n  .filter(h => h && h.role && h.content)\n  .slice(-12);\n\nconst histText = history.length\n  ? history.map(h => {\n      const role = h.role === 'assistant' ? 'LyncDoc' : 'Patient';\n      return `${role}: ${h.content}`;\n    }).join('\\n')\n  : '(no previous messages — new conversation)';\n\n// ── Booking draft ──────────────────────────\nlet draft = '{}';\nlet draftObj = {};\ntry {\n  const bd = session.booking_draft;\n  draftObj = typeof bd === 'string'\n    ? JSON.parse(bd)\n    : (bd && typeof bd === 'object' ? bd : {});\n  draft = Object.keys(draftObj).length ? JSON.stringify(draftObj, null, 2) : '{}';\n} catch(_) {}\n\n// ── Date/Time ─────────────────────────────\nconst now = new Date();\nconst today = now.toISOString().split('T')[0];\nconst time = now.toLocaleTimeString('en-IN', {\n  hour: '2-digit', minute: '2-digit', hour12: true,\n  timeZone: 'Asia/Kolkata'\n});\nconst dayName = now.toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' });\n\n// ── Determine message context ──────────────\nlet messageContext = '';\nif (buttonId) {\n  if (buttonId.startsWith('doctor_')) {\n    const doctorId = buttonId.replace('doctor_', '');\n    messageContext = `DOCTOR SELECTED: ID=${doctorId} (doctor_id = \"${doctorId}\")`;\n  } else if (buttonId.startsWith('slot_')) {\n    const slotId = buttonId.replace('slot_', '');\n    messageContext = `SLOT SELECTED: slot_id=${slotId} (use this exact value for slot_id in booking)`;\n  } else if (buttonId.startsWith('cancel_')) {\n    const ref = buttonId.replace('cancel_', '');\n    messageContext = `CANCELLATION SELECTED: booking_ref=${ref}`;\n  } else if (buttonId.startsWith('reschedule_')) {\n    const ref = buttonId.replace('reschedule_', '');\n    messageContext = `RESCHEDULE SELECTED: booking_ref=${ref}`;\n  } else if (buttonId.startsWith('view_')) {\n    const ref = buttonId.replace('view_', '');\n    messageContext = `BOOKING VIEWED: booking_ref=${ref} — show details and action buttons`;\n  } else {\n    messageContext = `BUTTON TAPPED: id=${buttonId}`;\n  }\n}\n\n// ── Detect what was just asked ─────────────\n// Find the last LyncDoc message to know what question was just asked\nconst lastAIMsg = history\n  .filter(h => h.role === 'assistant')\n  .slice(-1)[0];\n\nlet lastQuestion = '';\nif (lastAIMsg && !buttonId) {\n  const m = lastAIMsg.content.toLowerCase();\n  if (m.includes('full name') || m.includes('patient\\'s name') || m.includes('what is the name')) {\n    lastQuestion = 'patient_name';\n  } else if (m.includes('how old') || m.includes('age of') || m.includes('patient\\'s age') || m.includes('old is')) {\n    lastQuestion = 'patient_age';\n  } else if (m.includes('gender') || m.includes('male') || m.includes('female')) {\n    lastQuestion = 'patient_gender';\n  } else if (m.includes('symptom') || m.includes('reason for visit') || m.includes('complaints')) {\n    lastQuestion = 'symptoms';\n  } else if (m.includes('pincode') || m.includes('pin code') || m.includes('6-digit')) {\n    lastQuestion = 'pincode';\n  }\n}\n\n// ── Determine next missing field ───────────\nconst missingFields = [];\nif (!draftObj.patient_name) missingFields.push('patient_name');\nif (!draftObj.patient_age)  missingFields.push('patient_age');\nif (!draftObj.patient_gender) missingFields.push('patient_gender');\nif (draftObj.symptoms === undefined) missingFields.push('symptoms');\n\nconst nextMissingField = missingFields[0] || null;\n\n// ── Build answer context ───────────────────\nlet answerContext = '';\nif (lastQuestion && msgType === 'text' && !buttonId) {\n  answerContext = `ANSWER CONTEXT: Patient just answered \"${userText}\" in response to the question about ${lastQuestion}. Save \"${userText}\" as ${lastQuestion} in draft_update and immediately proceed to the next step.`;\n}\n\n// ── Build prompt ───────────────────────────\nconst promptLines = [\n  '═══ PATIENT CONTEXT ═══',\n  `PHONE: ${phone}`,\n  `NAME: ${profile}`,\n  `DATE: ${today} (${dayName}) | TIME: ${time} IST`,\n  `LAST INTENT: ${session.last_intent || 'none'}`,\n  `MESSAGE COUNT: ${session.message_count || 0}`,\n  `MESSAGE TYPE: ${msgType}${rawInteractiveType ? ' / ' + rawInteractiveType : ''}`,\n  '',\n  '═══ BOOKING DRAFT (DO NOT ASK AGAIN) ═══',\n  draft,\n  '',\n  nextMissingField ? `NEXT MISSING FIELD: ${nextMissingField}` : 'ALL PATIENT FIELDS COLLECTED',\n  '',\n  '═══ CONVERSATION HISTORY ═══',\n  histText,\n  '',\n  '═══ CURRENT MESSAGE ═══',\n  `Patient says: \"${userText}\"`,\n  messageContext ? messageContext : '',\n  answerContext ? answerContext : ''\n].filter(Boolean);\n\nconst prompt = promptLines.join('\\n');\n\nreturn [{ json: { phone, phoneId, profile, userText, buttonId, msgType, draftObj, prompt } }];"
+        "jsCode": "const ing = $('Ingest Message').first().json;\nconst { phone, phoneId, profile, userText, buttonId, msgType, rawInteractiveType } = ing;\n\nconst sessionItems = $('Load Session').all().map(i => i.json);\nconst session = (sessionItems.length > 0 && sessionItems[0].phone)\n  ? sessionItems[0]\n  : { booking_draft: {}, last_intent: 'none', message_count: 0 };\n\nconst convItems = $('Load Convo').all().map(i => i.json);\nconst history = convItems.filter(h => h && h.role && h.content).reverse().slice(-12);\nconst histText = history.length\n  ? history.map(h => `${h.role === 'assistant' ? 'LyncDoc' : 'Patient'}: ${h.content}`).join('\\n')\n  : '(new conversation)';\n\nlet draftObj = {};\ntry {\n  const bd = session.booking_draft;\n  draftObj = typeof bd === 'string' ? JSON.parse(bd) : (bd && typeof bd === 'object' ? bd : {});\n} catch(_) {}\nconst draft = Object.keys(draftObj).length ? JSON.stringify(draftObj, null, 2) : '{}';\n\nconst now = new Date();\nconst today = now.toISOString().split('T')[0];\nconst time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });\nconst dayName = now.toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' });\n\n// Resolve today/tomorrow to actual dates in IST\nconst nowIST = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));\nfunction isoDate(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }\nconst todayDate = isoDate(nowIST);\nconst tomorrowDate = (() => { const t = new Date(nowIST); t.setDate(t.getDate()+1); return isoDate(t); })();\n\nlet messageContext = '';\nif (buttonId) {\n  if (buttonId === 'btn_confirm_booking') {\n    messageContext = 'ACTION: PATIENT CONFIRMED BOOKING. Call create_booking_request tool NOW using these exact values from the draft above: patient_name, patient_age, patient_gender, specialty_id, symptoms, pincode, preferred_date, preferred_time_slot.';\n  } else if (buttonId === 'btn_cancel_booking') {\n    messageContext = 'ACTION: Patient cancelled booking flow. Do NOT create booking. Respond politely and clear draft.';\n  } else if (buttonId === 'btn_today') {\n    messageContext = `ACTION: Patient chose Today. Save to draft: preferred_date = ${todayDate}`;\n  } else if (buttonId === 'btn_tomorrow') {\n    messageContext = `ACTION: Patient chose Tomorrow. Save to draft: preferred_date = ${tomorrowDate}`;\n  } else if (buttonId === 'btn_pick_date') {\n    messageContext = 'ACTION: Patient wants to pick a specific date. Ask them to type a date (e.g. \"15 April\" or \"next Monday\"). Today is ' + todayDate + '.';\n  } else if (buttonId === 'btn_morning') {\n    messageContext = 'ACTION: Patient chose Morning. Save to draft: preferred_time_slot = Morning';\n  } else if (buttonId === 'btn_afternoon') {\n    messageContext = 'ACTION: Patient chose Afternoon. Save to draft: preferred_time_slot = Afternoon';\n  } else if (buttonId === 'btn_evening') {\n    messageContext = 'ACTION: Patient chose Evening. Save to draft: preferred_time_slot = Evening';\n  } else if (buttonId === 'btn_male') {\n    messageContext = 'ACTION: Patient chose Male. Save to draft: patient_gender = Male';\n  } else if (buttonId === 'btn_female') {\n    messageContext = 'ACTION: Patient chose Female. Save to draft: patient_gender = Female';\n  } else if (buttonId === 'btn_other_gender') {\n    messageContext = 'ACTION: Patient chose Other gender. Save to draft: patient_gender = Other';\n  } else if (buttonId === 'btn_book') {\n    messageContext = 'ACTION: Patient wants to book a doctor. Start the booking flow from step 1 (symptoms).';\n  } else if (buttonId === 'btn_bookings') {\n    messageContext = 'ACTION: Patient wants to see their bookings. Call get_bookings tool.';\n  } else if (buttonId === 'btn_help') {\n    messageContext = 'ACTION: Patient wants to talk to a support agent. Set intent=support.';\n  } else if (buttonId.startsWith('cancel_')) {\n    messageContext = `ACTION: Cancel booking_ref=${buttonId.replace('cancel_', '')}`;\n  } else if (buttonId.startsWith('view_')) {\n    messageContext = `ACTION: Show details for booking_ref=${buttonId.replace('view_', '')}`;\n  } else {\n    messageContext = `BUTTON: ${buttonId}`;\n  }\n}\n\nconst lastAIMsg = history.filter(h => h.role === 'assistant').slice(-1)[0];\nlet lastQuestion = '';\nif (lastAIMsg && !buttonId) {\n  const m = lastAIMsg.content.toLowerCase();\n  if (m.includes('full name') || m.includes(\"patient's name\")) lastQuestion = 'patient_name';\n  else if (m.includes('how old') || m.includes('age')) lastQuestion = 'patient_age';\n  else if (m.includes('gender')) lastQuestion = 'patient_gender';\n  else if (m.includes('symptom') || m.includes('reason') || m.includes('what brings') || m.includes('how can i help')) lastQuestion = 'symptoms';\n  else if (m.includes('pincode') || m.includes('pin code')) lastQuestion = 'pincode';\n  else if (m.includes('when would') || m.includes('preferred date') || m.includes('like the visit')) lastQuestion = 'preferred_date';\n  else if (m.includes('time works') || (m.includes('morning') && m.includes('afternoon'))) lastQuestion = 'preferred_time';\n}\n\nconst missingFields = [];\nif (!draftObj.specialty_id) missingFields.push('specialty_id');\nif (!draftObj.pincode) missingFields.push('pincode');\nif (!draftObj.preferred_date) missingFields.push('preferred_date');\nif (!draftObj.preferred_time_slot) missingFields.push('preferred_time_slot');\nif (!draftObj.patient_name) missingFields.push('patient_name');\nif (!draftObj.patient_age) missingFields.push('patient_age');\nif (!draftObj.patient_gender) missingFields.push('patient_gender');\n\nlet answerContext = '';\nif (lastQuestion && msgType === 'text' && !buttonId) {\n  answerContext = `ANSWER: Patient answered \"${userText}\" for ${lastQuestion}. Save to draft_update and proceed.`;\n}\n\nconst prompt = [\n  '=== PATIENT ===' ,\n  `PHONE: ${phone} | NAME: ${profile}`,\n  `DATE: ${today} (${dayName}) | TIME: ${time} IST`,\n  `LAST_INTENT: ${session.last_intent || 'none'} | MSG_COUNT: ${session.message_count || 0}`,\n  '',\n  '=== BOOKING DRAFT ===',\n  draft,\n  '',\n  missingFields.length ? `NEXT_MISSING: ${missingFields[0]}` : 'ALL FIELDS COLLECTED',\n  '',\n  '=== HISTORY ===',\n  histText,\n  '',\n  '=== NOW ===',\n  `Patient: \"${userText}\"`,\n  messageContext,\n  answerContext\n].filter(Boolean).join('\\n');\n\nreturn [{ json: { phone, phoneId, profile, userText, buttonId, msgType, draftObj, prompt } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        464,
-        1248
+        592,
+        400
       ],
-      "id": "d07e6333-a7f2-4d82-8740-a9e0c8dccbfc",
-      "name": "Context1"
+      "id": "d459b0a4-82ff-4e10-a7f0-b9ba227d7491",
+      "name": "Context Builder"
     },
     {
       "parameters": {
         "promptType": "define",
         "text": "={{ $json.prompt }}",
         "options": {
-          "systemMessage": "",
+          "systemMessage": "Return ONLY valid JSON. No markdown, no code fences. Start with { end with }.\n\nYou are LyncDoc — a friendly WhatsApp assistant for doctor home visits in Bangalore, India.\n\n=== HOW IT WORKS ===\nPatients do NOT pick a doctor. They describe symptoms, give location + date + time preference + personal info. We create a booking, broadcast to verified nearby doctors, and the first to accept wins — like Uber for doctors. Patient gets a WhatsApp confirmation when doctor accepts.\n\n=== RULES ===\n- Never invent data. Use tools for real info.\n- Never re-ask fields already in BOOKING DRAFT.\n- Buttons for 2-3 fixed choices. List for 4+ options.\n- Emergency (chest pain, stroke, seizure, severe bleeding, unconscious): immediately say \"Please call *108* (ambulance) or *112* (emergency) right now!\" then set intent=emergency.\n- Human agent request (\"talk to someone\", \"call me\"): set intent=support, tell them team will contact shortly.\n- Booking for family member: totally fine — collect that person's name, age, gender.\n\n=== WHATSAPP LIMITS ===\nButton title: max 20 chars. List row title: max 24 chars. List row desc: max 72 chars. Body: max 1024 chars. Header: max 60 chars.\n\n=== BOOKING FLOW (9 steps) ===\nSkip any step where BOOKING DRAFT already has the value.\n\n1. GREET & SYMPTOMS\n   Ask: \"Hi [name]! How can I help you today? Please describe what's happening.\"\n   Detect specialty from keywords. Save: {specialty_id, symptoms}\n   (If symptoms vague, ask 1 follow-up question then move on.)\n\n2. PINCODE\n   Ask: \"What's your pincode? We'll find doctors near you.\"\n   Save: {pincode} — must be 6 digits.\n\n3. DATE\n   Show 3 buttons:\n   {id:btn_today, title:\"Today\"}\n   {id:btn_tomorrow, title:\"Tomorrow\"}\n   {id:btn_pick_date, title:\"Pick a Date\"}\n   If btn_pick_date: ask \"Which date? (e.g. 20 April or next Monday)\" then convert to YYYY-MM-DD.\n   Save: {preferred_date} as YYYY-MM-DD.\n\n4. TIME SLOT\n   Show 3 buttons:\n   {id:btn_morning, title:\"Morning\"}\n   {id:btn_afternoon, title:\"Afternoon\"}\n   {id:btn_evening, title:\"Evening\"}\n   Save: {preferred_time_slot} as exactly Morning, Afternoon, or Evening.\n\n5. PATIENT NAME\n   Ask: \"Who is this appointment for? (Full name)\"\n   Accept family member names. Save: {patient_name}\n\n6. AGE\n   Ask: \"How old are they?\" Save: {patient_age}\n\n7. GENDER\n   Show 3 buttons:\n   {id:btn_male, title:\"Male\"}\n   {id:btn_female, title:\"Female\"}\n   {id:btn_other_gender, title:\"Other\"}\n   Save: {patient_gender} as exactly Male, Female, or Other.\n\n8. SUMMARY\n   Show all details clearly, then 2 buttons:\n   {id:btn_confirm_booking, title:\"Confirm Booking\"}\n   {id:btn_cancel_booking, title:\"Cancel\"}\n   Example summary:\n   \"Please confirm your booking:\\n\\n🏥 *[Specialty]*\\n📝 [Symptoms]\\n📍 Pincode: [pincode]\\n📅 [Date] · [Time slot]\\n👤 [Name], [Age], [Gender]\\n💰 Fee: ₹800 (all inclusive)\"\n\n9. ON CONFIRM (ACTION: PATIENT CONFIRMED BOOKING in prompt)\n   Call create_booking_request tool with ALL values from BOOKING DRAFT.\n   After tool returns booking_ref, reply:\n   \"✅ *Booking [REF] placed!*\\n\\nDoctors near you are being notified. You'll receive a WhatsApp message here as soon as a doctor accepts (usually within minutes).\\n\\n💰 Fee: ₹800 (all inclusive)\\nThe doctor will call before visiting.\\n\\nType *my bookings* anytime to check status.\"\n   Set intent=booking_created, draft_update=null.\n\n=== ON CANCEL BUTTON (btn_cancel_booking) ===\nRespond: \"No worries! Type *hi* anytime to start a new booking. 😊\"\nSet intent=greeting, draft_update=null.\n\n=== TOOL PARAMETERS for create_booking_request ===\n- patient_name: full name string from draft\n- patient_age: age number from draft\n- patient_gender: exactly Male or Female or Other\n- specialty_id: e.g. spec_gp (from draft)\n- symptoms: text from draft (or empty string)\n- pincode: 6-digit string from draft\n- preferred_date: YYYY-MM-DD from draft\n- preferred_time_slot: exactly Morning, Afternoon, or Evening\n\n=== MY BOOKINGS ===\nCall get_bookings tool. Format each booking:\n- searching/pending → \"🔍 *[REF]* — Finding doctor…\"\n- confirmed/in_progress → \"✅ *[REF]* — Dr. [doctor_name]\"\n- completed → \"✓ *[REF]* — Completed\"\n- cancelled → \"✗ *[REF]* — Cancelled\"\n- expired → \"⏰ *[REF]* — Expired (no doctor available)\"\nInclude date and specialty. If 0 bookings: \"No bookings found.\"\nIf cancellable bookings exist (searching/pending/confirmed), offer: \"Reply with a booking ref to cancel.\"\n\n=== CANCEL BOOKING ===\n1. If patient gave ref directly, confirm once then call cancel_booking.\n2. Otherwise call get_bookings → show cancellable ones → ask which to cancel → confirm → call cancel_booking.\n3. After cancel: \"Booking *[REF]* has been cancelled.\" Set intent=cancel_confirmed.\n\n=== SPECIALTY IDs (detect from symptoms) ===\nspec_gp: fever cold cough headache general weakness infection\nspec_child: baby child kid infant toddler vaccination\nspec_skin: skin rash acne eczema itching allergy hair nail\nspec_women: pregnancy periods pcod pcos fertility menstruation\nspec_bone: fracture bone joint back pain knee shoulder arthritis\nspec_heart: heart bp chest pain palpitations ECG blood pressure\nspec_neuro: brain migraine seizure nerve numbness epilepsy\nspec_eye: eye vision glasses cataract\nspec_ent: ear nose throat sinus tonsil hearing\nspec_emergency: emergency trauma accident urgent critical injury\nspec_elder: elderly senior geriatric old age dementia\nspec_other: other specialist\n\n=== JSON FORMAT ===\n{\"message\":\"text\",\"component\":\"text|buttons|list\",\"buttons\":[{\"id\":\"x\",\"title\":\"max20\"}],\"list_button_label\":\"Select\",\"list_sections\":[{\"title\":\"max24\",\"rows\":[{\"id\":\"x\",\"title\":\"max24\",\"description\":\"max72\"}]}],\"intent\":\"book|cancel|my_bookings|greeting|emergency|support|unknown|booking_created|cancel_confirmed\",\"draft_update\":{\"field\":\"value\"}}\n\nRules for draft_update:\n- Set to null when not updating draft\n- Set to {} (empty object) to clear the entire draft\n- Only include fields being updated, not the full draft\n\n=== DEFAULT GREETING (for hi/hello/start/menu) ===\n{\"message\":\"Hi! 👋 Welcome to *LyncDoc*\\n\\nI can book a verified doctor for a home visit in Bangalore. How can I help?\",\"component\":\"buttons\",\"buttons\":[{\"id\":\"btn_book\",\"title\":\"Book a Doctor\"},{\"id\":\"btn_bookings\",\"title\":\"My Bookings\"},{\"id\":\"btn_help\",\"title\":\"Talk to Someone\"}],\"intent\":\"greeting\",\"draft_update\":null}",
           "maxIterations": 6
         }
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
       "position": [
-        672,
-        1248
+        800,
+        400
       ],
-      "id": "9a99656a-1467-44b9-b8da-68f27032805f",
-      "name": "AI Agent1",
-      "alwaysOutputData": false
+      "id": "c7d250f3-3e74-43ad-996a-68f2b66644b1",
+      "name": "AI Agent",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -240,11 +193,11 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
       "typeVersion": 1,
       "position": [
-        400,
-        1552
+        528,
+        704
       ],
-      "id": "51e8bc6d-9489-4de0-b459-1729bc9bde65",
-      "name": "Google Gemini Chat Model1",
+      "id": "b79229aa-46bc-449f-bbf8-afd3998ca3d6",
+      "name": "Gemini",
       "credentials": {
         "googlePalmApi": {
           "id": "qr8XPWNOCtRMWmIR",
@@ -254,16 +207,117 @@
     },
     {
       "parameters": {
-        "jsCode": "// ═══════════════════════════════════════════\n// RESPONSE PARSER v4\n// Parses AI output with truncation recovery\n// ═══════════════════════════════════════════\n\nconst raw      = $input.first().json.output || '';\nconst phone    = $('Context1').first().json.phone;\nconst phoneId  = $('Context1').first().json.phoneId;\nconst profile  = $('Context1').first().json.profile;\nconst userText = $('Context1').first().json.userText;\nconst msgType  = $('Context1').first().json.msgType;\nconst draftObj = $('Context1').first().json.draftObj || {};\n\nlet ai = null;\n\n// ── Attempt 1: Clean and parse full JSON ──\ntry {\n  let clean = raw\n    .replace(/```json\\s*/gi, '')\n    .replace(/```\\s*/g, '')\n    .trim();\n\n  const s = clean.indexOf('{');\n  const e = clean.lastIndexOf('}');\n\n  if (s !== -1 && e !== -1 && e > s) {\n    ai = JSON.parse(clean.slice(s, e + 1));\n  }\n} catch (_) {\n\n  // ── Attempt 2: Truncation recovery ────────\n  try {\n    let clean = raw\n      .replace(/```json\\s*/gi, '')\n      .replace(/```\\s*/g, '')\n      .trim();\n\n    const s = clean.indexOf('{');\n    if (s !== -1) {\n      let partial = clean.slice(s);\n      let depth = 0;\n      let lastValidClose = -1;\n\n      for (let i = 0; i < partial.length; i++) {\n        if (partial[i] === '{') depth++;\n        if (partial[i] === '}') {\n          depth--;\n          if (depth === 0) lastValidClose = i;\n        }\n      }\n\n      if (lastValidClose > 0) {\n        // Parse up to last valid closing brace\n        ai = JSON.parse(partial.slice(0, lastValidClose + 1));\n      } else {\n        // Severely truncated — extract message field only\n        const msgMatch = partial.match(/\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"/);\n        const intentMatch = partial.match(/\"intent\"\\s*:\\s*\"([^\"]+)\"/);\n        if (msgMatch) {\n          ai = {\n            message: msgMatch[1].replace(/\\\\n/g, '\\n').replace(/\\\\t/g, ' '),\n            component: 'text',\n            intent: intentMatch ? intentMatch[1] : 'unknown',\n            draft_update: null\n          };\n        }\n      }\n    }\n  } catch (_2) {\n    // Both attempts failed — will use fallback\n  }\n}\n\n// ── Validate message field ─────────────────\nif (ai && (!ai.message || typeof ai.message !== 'string' || ai.message.trim() === '')) {\n  ai = null;\n}\n\n// ── Sanitize and enforce limits ────────────\nif (ai) {\n  // Truncate message\n  ai.message = String(ai.message).slice(0, 1024);\n\n  // Validate component\n  const validComponents = ['text', 'buttons', 'list'];\n  if (!validComponents.includes(ai.component)) {\n    ai.component = 'text';\n  }\n\n  // Validate buttons\n  if (ai.component === 'buttons') {\n    if (!Array.isArray(ai.buttons) || ai.buttons.length === 0) {\n      ai.component = 'text';\n    } else {\n      ai.buttons = ai.buttons.slice(0, 3).map(b => ({\n        id: String(b.id || 'btn').slice(0, 256),\n        title: String(b.title || '').slice(0, 20)\n      }));\n    }\n  }\n\n  // Validate list sections\n  if (ai.component === 'list') {\n    if (!Array.isArray(ai.list_sections) || ai.list_sections.length === 0) {\n      ai.component = 'text';\n    } else {\n      ai.list_sections = ai.list_sections\n        .map(sec => ({\n          title: String(sec.title || '').slice(0, 24),\n          rows: (sec.rows || [])\n            .filter(r => r && r.id && r.title)\n            .slice(0, 10)\n            .map(r => ({\n              id: String(r.id).slice(0, 200),\n              title: String(r.title).slice(0, 24),\n              ...(r.description ? { description: String(r.description).slice(0, 72) } : {})\n            }))\n        }))\n        .filter(sec => sec.rows.length > 0); // remove empty sections\n\n      if (ai.list_sections.length === 0) {\n        ai.component = 'text'; // nothing left after filtering\n      }\n    }\n  }\n\n  // Validate intent\n  const validIntents = ['book','reschedule','cancel','my_bookings','greeting','emergency','support','unknown','booking_confirmed','cancel_confirmed'];\n  if (!validIntents.includes(ai.intent)) {\n    ai.intent = 'unknown';\n  }\n\n  // Validate draft_update\n  if (ai.draft_update !== null && typeof ai.draft_update !== 'object') {\n    ai.draft_update = null;\n  }\n}\n\n// ── Hard fallback ──────────────────────────\nif (!ai) {\n  ai = {\n    message: '👋 Hi! Welcome to *LyncDoc*.\\n\\nHow can I help you today?',\n    component: 'buttons',\n    buttons: [\n      { id: 'btn_book',     title: 'Book Appointment' },\n      { id: 'btn_bookings', title: 'My Bookings' },\n      { id: 'btn_human',    title: 'Talk to Human' }\n    ],\n    intent: 'unknown',\n    draft_update: null\n  };\n}\n\nreturn [{ json: { phone, phoneId, profile, userText, msgType, ai } }];"
+        "toolDescription": "get_specialties — Returns all medical specialties with IDs and symptom keywords. Call when user mentions symptoms.",
+        "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/specialties?is_active=eq.true&select=id,label,emoji&order=sort_order.asc",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        704,
+        784
+      ],
+      "id": "efd176f4-d792-40af-bcc0-4f8a0ceca0e3",
+      "name": "get_specialties",
+      "credentials": {
+        "supabaseApi": {
+          "id": "3YH2ieK8pl9hK7aT",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "get_bookings — Fetches all bookings for this patient by phone. Returns all statuses. Use for My Bookings or to find a booking to cancel.",
+        "url": "={{ 'https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/bookings?patient_phone=eq.%2B' + $('Ingest Message').first().json.phone + '&select=booking_ref,status,doctor_name,specialty_id,symptoms,preferred_date,preferred_time_slot,fee_amount,created_at&order=created_at.desc&limit=10' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        864,
+        784
+      ],
+      "id": "17ed2c22-c071-430a-a425-eda048ddd33a",
+      "name": "get_bookings",
+      "credentials": {
+        "supabaseApi": {
+          "id": "3YH2ieK8pl9hK7aT",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "create_booking_request — Creates a booking and broadcasts to matching doctors. Call ONLY after patient taps Confirm. Returns JSON with booking_ref.",
+        "method": "POST",
+        "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/rpc/create_and_broadcast_booking",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  p_patient_name: $fromAI('patient_name', 'patient full name from draft'),\n  p_patient_phone: String($('Ingest Message').first().json.phone),\n  p_patient_age: Number($fromAI('patient_age', 'patient age number from draft')),\n  p_patient_gender: $fromAI('patient_gender', 'exactly Male or Female or Other'),\n  p_specialty_id: $fromAI('specialty_id', 'specialty id like spec_gp from draft'),\n  p_symptoms: $fromAI('symptoms', 'symptoms text from draft or empty string'),\n  p_pincode: $fromAI('pincode', '6 digit pincode from draft'),\n  p_preferred_date: $fromAI('preferred_date', 'date YYYY-MM-DD from draft'),\n  p_preferred_time_slot: $fromAI('preferred_time_slot', 'Morning or Afternoon or Evening from draft'),\n  p_booking_source: 'whatsapp'\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        1024,
+        784
+      ],
+      "id": "b5ec24b6-ac76-4efa-a159-694f26bfe1ba",
+      "name": "create_booking_request",
+      "credentials": {
+        "supabaseApi": {
+          "id": "3YH2ieK8pl9hK7aT",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "cancel_booking — Cancels a booking by ref and phone. Works on searching/pending/confirmed.",
+        "method": "PATCH",
+        "url": "={{ 'https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/bookings?booking_ref=eq.' + $fromAI('booking_ref', 'booking reference like LYN100001') + '&patient_phone=eq.%2B' + $('Ingest Message').first().json.phone + '&status=in.(searching,pending,confirmed)' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  status: 'cancelled',\n  cancelled_at: new Date().toISOString(),\n  cancellation_reason: $fromAI('cancellation_reason', 'reason for cancellation')\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        1184,
+        784
+      ],
+      "id": "87bb90c2-58b3-41fb-8c02-667c654cfecc",
+      "name": "cancel_booking",
+      "credentials": {
+        "supabaseApi": {
+          "id": "3YH2ieK8pl9hK7aT",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output || $input.first().json.text || '';\nconst phone    = $('Context Builder').first().json.phone;\nconst phoneId  = $('Context Builder').first().json.phoneId;\nconst profile  = $('Context Builder').first().json.profile;\nconst userText = $('Context Builder').first().json.userText;\nconst msgType  = $('Context Builder').first().json.msgType;\nconst draftObj = $('Context Builder').first().json.draftObj || {};\n\nlet ai = null;\n\ntry {\n  let clean = raw.replace(/```json\\s*/gi, '').replace(/```\\s*/g, '').trim();\n  const s = clean.indexOf('{');\n  const e = clean.lastIndexOf('}');\n  if (s !== -1 && e !== -1 && e > s) ai = JSON.parse(clean.slice(s, e + 1));\n} catch (_) {}\n\nif (!ai) {\n  try {\n    let clean = raw.replace(/```json\\s*/gi, '').replace(/```\\s*/g, '').trim();\n    const s = clean.indexOf('{');\n    if (s !== -1) {\n      let partial = clean.slice(s);\n      let depth = 0, lastValid = -1;\n      for (let i = 0; i < partial.length; i++) {\n        if (partial[i] === '{') depth++;\n        if (partial[i] === '}') { depth--; if (depth === 0) lastValid = i; }\n      }\n      if (lastValid > 0) ai = JSON.parse(partial.slice(0, lastValid + 1));\n      else {\n        const m = partial.match(/\"message\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"/);\n        if (m) ai = { message: m[1].replace(/\\\\n/g, '\\n'), component: 'text', intent: 'unknown', draft_update: null };\n      }\n    }\n  } catch (_2) {}\n}\n\nif (ai && (!ai.message || typeof ai.message !== 'string' || !ai.message.trim())) ai = null;\n\nif (ai) {\n  ai.message = String(ai.message).slice(0, 1024);\n  if (!['text','buttons','list'].includes(ai.component)) ai.component = 'text';\n  if (ai.component === 'buttons') {\n    if (!Array.isArray(ai.buttons) || !ai.buttons.length) ai.component = 'text';\n    else ai.buttons = ai.buttons.slice(0, 3).map(b => ({ id: String(b.id||'btn').slice(0,256), title: String(b.title||'').slice(0,20) }));\n  }\n  if (ai.component === 'list') {\n    if (!Array.isArray(ai.list_sections) || !ai.list_sections.length) ai.component = 'text';\n    else {\n      ai.list_sections = ai.list_sections.map(sec => ({\n        title: String(sec.title||'Options').slice(0,24),\n        rows: (sec.rows||[]).filter(r=>r?.id&&r?.title).slice(0,10).map(r=>({\n          id:String(r.id).slice(0,200), title:String(r.title).slice(0,24),\n          ...(r.description?{description:String(r.description).slice(0,72)}:{})\n        }))\n      })).filter(s=>s.rows.length);\n      if (!ai.list_sections.length) ai.component = 'text';\n    }\n  }\n  const vi = ['book','cancel','my_bookings','greeting','emergency','support','unknown','booking_created','cancel_confirmed'];\n  if (!vi.includes(ai.intent)) ai.intent = 'unknown';\n  if (ai.draft_update !== null && typeof ai.draft_update !== 'object') ai.draft_update = null;\n}\n\nif (!ai) {\n  ai = { message: \"Something went wrong. Please send *hi* to start again.\", component: 'text', intent: 'unknown', draft_update: null };\n}\n\nreturn [{ json: { phone, phoneId, profile, userText, msgType, ai } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1024,
-        1248
+        1152,
+        400
       ],
-      "id": "ea01907d-654e-4ded-96f8-503ea5df864c",
-      "name": "Response1"
+      "id": "6218a6b8-b0b2-4e87-bedf-07fad49c013b",
+      "name": "Parse Response",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -298,24 +352,25 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1232,
-        1248
+        1360,
+        400
       ],
-      "id": "13ddc9b5-f5bb-485f-8398-6c2d97b5f28d",
-      "name": "Save AI Message1"
+      "id": "864ca618-8d8b-4eb6-927c-7274c01aa8c1",
+      "name": "Save AI Message",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "// ═══════════════════════════════════════════\n// SESSION PAYLOAD v4.1\n// Merges draft, handles intent-based clearing\n// ═══════════════════════════════════════════\n\nconst phone   = $('Ingest Message1').first().json.phone;\nconst profile = $('Ingest Message1').first().json.profile;\nconst ai      = $('Response1').first().json.ai;\n\n// ── Load existing session ──────────────────\nconst sessionItems = $('Load Session1').all().map(i => i.json);\nconst existing = (sessionItems.length > 0 && sessionItems[0].phone)\n  ? sessionItems[0]\n  : { booking_draft: {}, message_count: 0 };\n\n// ── Parse existing draft safely ────────────\nlet existingDraft = {};\ntry {\n  const bd = existing.booking_draft;\n  existingDraft = typeof bd === 'string'\n    ? JSON.parse(bd)\n    : (bd && typeof bd === 'object' ? bd : {});\n} catch(_) {}\n\n// ── Merge draft update from AI ─────────────\nlet newDraft = existingDraft;\nif (ai.draft_update && typeof ai.draft_update === 'object' && !Array.isArray(ai.draft_update)) {\n  newDraft = { ...existingDraft, ...ai.draft_update };\n  // Remove null/undefined values from draft\n  Object.keys(newDraft).forEach(k => {\n    if (newDraft[k] === null || newDraft[k] === undefined) {\n      delete newDraft[k];\n    }\n  });\n}\n\n// ── Clear draft on terminal intents ────────\nconst clearIntents = ['booking_confirmed', 'cancel_confirmed', 'greeting'];\nif (clearIntents.includes(ai.intent)) {\n  newDraft = {};\n}\n\n// ── Also clear if booking ref just created ─\n// Catches cases where Gemini returns intent=book instead of booking_confirmed\nconst aiMessage = ai.message || '';\nconst bookingJustCreated = \n  aiMessage.includes('LYN') && \n  (\n    aiMessage.toLowerCase().includes('confirmed') ||\n    aiMessage.toLowerCase().includes('reference') ||\n    aiMessage.toLowerCase().includes('booking ref') ||\n    aiMessage.toLowerCase().includes('see you on')\n  );\n\nif (bookingJustCreated) {\n  newDraft = {};\n}\n\n// ── Also clear on greeting keywords ────────\n// Catches \"hi\", \"hello\" etc. at any point in conversation\nconst userText = $('Ingest Message1').first().json.userText || '';\nconst greetingKeywords = ['hi', 'hello', 'hey', 'start', 'menu', 'restart', 'hii', 'helo'];\nconst isGreeting = greetingKeywords.includes(userText.toLowerCase().trim());\n\nif (isGreeting) {\n  newDraft = {};\n}\n\n// ── Build session upsert ───────────────────\nconst sessionUpsert = {\n  phone,\n  profile_name:  profile,\n  booking_draft: newDraft,\n  last_intent:   ai.intent || 'unknown',\n  last_active:   new Date().toISOString(),\n  message_count: (existing.message_count || 0) + 1\n};\n\nreturn [{ json: { phone, sessionUpsert, ai } }];"
+        "jsCode": "const phone   = $('Ingest Message').first().json.phone;\nconst profile = $('Ingest Message').first().json.profile;\nconst ai      = $('Parse Response').first().json.ai;\n\nconst sessionItems = $('Load Session').all().map(i => i.json);\nconst existing = (sessionItems.length > 0 && sessionItems[0].phone)\n  ? sessionItems[0] : { booking_draft: {}, message_count: 0 };\n\nlet existingDraft = {};\ntry {\n  const bd = existing.booking_draft;\n  existingDraft = typeof bd === 'string' ? JSON.parse(bd) : (bd && typeof bd === 'object' ? bd : {});\n} catch(_) {}\n\nlet newDraft = { ...existingDraft };\nif (ai.draft_update && typeof ai.draft_update === 'object' && !Array.isArray(ai.draft_update)) {\n  newDraft = { ...existingDraft, ...ai.draft_update };\n  Object.keys(newDraft).forEach(k => { if (newDraft[k] === null || newDraft[k] === undefined) delete newDraft[k]; });\n}\n\nconst clearIntents = ['booking_created', 'cancel_confirmed', 'greeting'];\nif (clearIntents.includes(ai.intent)) newDraft = {};\n\nconst aiMsg = ai.message || '';\nif (aiMsg.includes('LYN') && (aiMsg.toLowerCase().includes('booking') && (aiMsg.toLowerCase().includes('placed') || aiMsg.toLowerCase().includes('confirmed')))) newDraft = {};\n\nconst userText = $('Ingest Message').first().json.userText || '';\nif (['hi','hello','hey','start','menu','restart'].includes(userText.toLowerCase().trim())) newDraft = {};\n\nconst buttonId = $('Ingest Message').first().json.buttonId || '';\nif (buttonId === 'btn_cancel_booking') newDraft = {};\n\nconst sessionUpsert = {\n  phone,\n  profile_name: profile,\n  booking_draft: newDraft,\n  last_intent: ai.intent || 'unknown',\n  last_active: new Date().toISOString(),\n  message_count: (existing.message_count || 0) + 1\n};\n\nreturn [{ json: { phone, sessionUpsert, ai } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1440,
-        1248
+        1568,
+        400
       ],
-      "id": "56567694-e3eb-4adc-a59a-47e7e9303121",
-      "name": "Session Payload1"
+      "id": "7134749e-c7cc-49f2-98ab-14990cf68119",
+      "name": "Session Payload"
     },
     {
       "parameters": {
@@ -350,24 +405,25 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        1664,
-        1248
+        1792,
+        400
       ],
-      "id": "f28b9686-4243-4471-bbff-13b0717e79a4",
-      "name": "Upsert Session1"
+      "id": "d7055f0d-8d82-4a4d-a0ef-27f11a0cec92",
+      "name": "Upsert Session",
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "// ═══════════════════════════════════════════\n// RENDER FORMAT TO WHATSAPP v4\n// Converts AI response to WhatsApp payload\n// ═══════════════════════════════════════════\n\nconst { phone, phoneId, ai } = $('Response1').first().json;\n\n// ── Hard fallback ──────────────────────────\nif (!ai?.message) {\n  return [{ json: { phoneId, payload: {\n    messaging_product: 'whatsapp',\n    to: phone,\n    type: 'text',\n    text: { body: '⚠️ Something went wrong. Send *hi* to restart.' }\n  }}}];\n}\n\nconst msg  = String(ai.message).slice(0, 1024);\nconst comp = ai.component || 'text';\nlet payload;\n\n// ── Buttons ────────────────────────────────\nif (comp === 'buttons' && Array.isArray(ai.buttons) && ai.buttons.length > 0) {\n  const buttons = ai.buttons\n    .slice(0, 3)\n    .filter(b => b && b.id && b.title)\n    .map(b => ({\n      type: 'reply',\n      reply: {\n        id:    String(b.id).slice(0, 256),\n        title: String(b.title).slice(0, 20)\n      }\n    }));\n\n  if (buttons.length > 0) {\n    payload = {\n      messaging_product: 'whatsapp',\n      recipient_type: 'individual',\n      to: phone,\n      type: 'interactive',\n      interactive: {\n        type: 'button',\n        body: { text: msg },\n        action: { buttons }\n      }\n    };\n  } else {\n    // No valid buttons after filtering\n    payload = {\n      messaging_product: 'whatsapp',\n      recipient_type: 'individual',\n      to: phone,\n      type: 'text',\n      text: { body: msg }\n    };\n  }\n\n// ── List ───────────────────────────────────\n} else if (comp === 'list' && Array.isArray(ai.list_sections) && ai.list_sections.length > 0) {\n  const sections = ai.list_sections\n    .map(sec => ({\n      title: String(sec.title || 'Options').slice(0, 24),\n      rows: (sec.rows || [])\n        .filter(r => r && r.id && r.title)\n        .slice(0, 10)\n        .map(r => ({\n          id:    String(r.id).slice(0, 200),\n          title: String(r.title).slice(0, 24),\n          ...(r.description ? { description: String(r.description).slice(0, 72) } : {})\n        }))\n    }))\n    .filter(sec => sec.rows.length > 0);\n\n  if (sections.length > 0) {\n    payload = {\n      messaging_product: 'whatsapp',\n      recipient_type: 'individual',\n      to: phone,\n      type: 'interactive',\n      interactive: {\n        type: 'list',\n        body: { text: msg },\n        action: {\n          button: String(ai.list_button_label || 'Select').slice(0, 20),\n          sections\n        }\n      }\n    };\n  } else {\n    // All sections empty after filtering\n    payload = {\n      messaging_product: 'whatsapp',\n      recipient_type: 'individual',\n      to: phone,\n      type: 'text',\n      text: { body: msg }\n    };\n  }\n\n// ── Plain text ─────────────────────────────\n} else {\n  payload = {\n    messaging_product: 'whatsapp',\n    recipient_type: 'individual',\n    to: phone,\n    type: 'text',\n    text: { body: String(ai.message).slice(0, 4096) }\n  };\n}\n\nreturn [{ json: { phoneId, payload } }];"
+        "jsCode": "const { phone, phoneId, ai } = $('Parse Response').first().json;\n\nif (!ai?.message) {\n  return [{ json: { phoneId, payload: {\n    messaging_product: 'whatsapp', to: phone, type: 'text',\n    text: { body: 'Something went wrong. Send *hi* to restart.' }\n  }}}];\n}\n\nconst msg = String(ai.message).slice(0, 1024);\nconst comp = ai.component || 'text';\nlet payload;\n\nif (comp === 'buttons' && Array.isArray(ai.buttons) && ai.buttons.length > 0) {\n  const buttons = ai.buttons.slice(0,3).filter(b=>b?.id&&b?.title).map(b=>({\n    type:'reply', reply:{id:String(b.id).slice(0,256), title:String(b.title).slice(0,20)}\n  }));\n  payload = buttons.length ? {\n    messaging_product:'whatsapp', recipient_type:'individual', to:phone,\n    type:'interactive', interactive:{type:'button', body:{text:msg}, action:{buttons}}\n  } : {messaging_product:'whatsapp', to:phone, type:'text', text:{body:msg}};\n} else if (comp === 'list' && Array.isArray(ai.list_sections) && ai.list_sections.length > 0) {\n  const sections = ai.list_sections.map(sec=>({\n    title:String(sec.title||'Options').slice(0,24),\n    rows:(sec.rows||[]).filter(r=>r?.id&&r?.title).slice(0,10).map(r=>({\n      id:String(r.id).slice(0,200), title:String(r.title).slice(0,24),\n      ...(r.description?{description:String(r.description).slice(0,72)}:{})\n    }))\n  })).filter(s=>s.rows.length);\n  payload = sections.length ? {\n    messaging_product:'whatsapp', recipient_type:'individual', to:phone,\n    type:'interactive', interactive:{\n      type:'list', body:{text:msg},\n      action:{button:String(ai.list_button_label||'Select').slice(0,20), sections}\n    }\n  } : {messaging_product:'whatsapp', to:phone, type:'text', text:{body:msg}};\n} else {\n  payload = {messaging_product:'whatsapp', to:phone, type:'text', text:{body:msg}};\n}\n\nreturn [{ json: { phoneId, payload } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1872,
-        1248
+        2000,
+        400
       ],
-      "id": "6161bbe4-c2d8-4ce3-83a8-1f17c0c4bef2",
-      "name": "Render Format to WA1"
+      "id": "1639b4d4-a430-4b49-af7c-3d700f997141",
+      "name": "Render to WhatsApp"
     },
     {
       "parameters": {
@@ -378,7 +434,7 @@
           "parameters": [
             {
               "name": "Authorization",
-              "value": "Bearer EAAL5sH3zBMMBQ2rOSoPqb9LIfdz5dnWN5P6C165tJbqT3zPpGJsxMDxaFwS97K53UvOygMwHwBddJgZAtyMZBOaXJTnqzMUN13o4AvbK97wadPqkfCwmYspuMPY92tJM5QKqDcJ8Dm7ourkFL8M1i8N5vIDkeKOAVOYpc6j8pgTWGaiCZBLgz9IcaDVBLQvrA8x5o6GZBunsDDHbZAT1hXZCDk1PX8MoJpjBdpuMyDeDyirmIKmgJ3fyh58ZCo0ZCDVVLwmw6ru68hN3dQCYVUlE66sWBHZAZBkrpraH2SkAZDZD"
+              "value": "Bearer EAAL5sH3zBMMBRHm6vGoJDlrpcrfFQ9GC9bs6oZBPG2MVoFVP2lM3Uen9tv6JVVWmV7hl4Uxqm7EslZBeY1Q6FjaR8eVkOYkrf8dfk10sOZBquzp2ZCNFNPZBkZCNjX4IF0sR18dmALXUQ9gnuLxKQuDzMC42kNVtHb6kxk4nPdC1tc2PpTDHJHSEZCW8uEQCr70cy8qEvQ0tChs9LqEAqqbO0BOha9QZBUt8eoyXhikZA55mk464yHswwz4AngHZBaPE8aYDVYZAhF6ZAZCk6cxFHY2Sr3gTvCAqhG00PfnuKkkIZD"
             },
             {
               "name": "Content-Type",
@@ -394,196 +450,31 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [
-        2080,
-        1248
+        2208,
+        400
       ],
-      "id": "1458b383-626e-4b8a-93ae-f7828d6398b1",
-      "name": "Send Message1"
-    },
-    {
-      "parameters": {
-        "toolDescription": "get_doctors: Fetches active doctors filtered by specialty ID and 6-digit pincode. Returns doctor details including id, name, qualification, experience, rating, fee, and available slot count. Results sorted by highest rating.",
-        "url": "={{ 'https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/v_doctor_search?spec_id=eq.' + $fromAI('spec_id', 'Specialty ID e.g. spec_gp') + '&pincode=eq.' + $fromAI('pincode', '6-digit pincode') + '&order=rating.desc&limit=8' }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.4,
-      "position": [
-        704,
-        1632
-      ],
-      "id": "94e0ede9-2efb-403b-bcc6-51bf0c47caa9",
-      "name": "get doctors1",
-      "credentials": {
-        "supabaseApi": {
-          "id": "3YH2ieK8pl9hK7aT",
-          "name": "Supabase account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "toolDescription": "get_slots: Fetches available appointment slots for a specific doctor. Use the doctor_id from get_doctors result. Returns slots sorted by date and start time. Only shows available (not booked/blocked) slots from today onwards.",
-        "url": "={{ 'https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/v_available_slots?doctor_id=eq.' + $fromAI('doctor_id', 'Doctor ID from get_doctors result e.g. d1') + '&order=date_string.asc,start_time.asc&limit=20' }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.4,
-      "position": [
-        832,
-        1632
-      ],
-      "id": "71779fd6-bb5d-4dd1-b505-803edf3ab4d9",
-      "name": "get slots1",
-      "credentials": {
-        "supabaseApi": {
-          "id": "3YH2ieK8pl9hK7aT",
-          "name": "Supabase account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "toolDescription": "get_bookings: Fetches ALL bookings for this patient using their WhatsApp phone number. Returns past and upcoming bookings across all statuses (pending, confirmed, completed, cancelled). Sorted by slot_date ascending so upcoming appear first.",
-        "url": "={{ 'https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/bookings?phone=eq.' + $('Ingest Message1').first().json.phone + '&order=slot_date.asc,created_at.desc&limit=20' }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.4,
-      "position": [
-        960,
-        1632
-      ],
-      "id": "6a9ff68d-f698-4ecf-895c-2e013c9bfa36",
-      "name": "get bookings1",
-      "credentials": {
-        "supabaseApi": {
-          "id": "3YH2ieK8pl9hK7aT",
-          "name": "Supabase account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "toolDescription": "create_booking: Inserts a confirmed appointment into the bookings table. Only call this AFTER the patient has explicitly confirmed the booking summary. booking_ref is auto-generated. Returns the created booking including booking_ref.",
-        "method": "POST",
-        "url": "=https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/bookings",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Prefer",
-              "value": "return=representation"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  phone: $('Ingest Message1').first().json.phone,\n  patient_name: $fromAI('patient_name', 'Full name of patient'),\n  patient_age: parseInt($fromAI('patient_age', 'Age as integer')),\n  patient_gender: $fromAI('patient_gender', 'Male, Female, or Other'),\n  doctor_id: $fromAI('doctor_id', 'Doctor ID e.g. d1'),\n  doctor_name: $fromAI('doctor_name', 'Doctor full name'),\n  slot_id: $fromAI('slot_id', 'Slot ID from get_slots e.g. s1_d1_2026-03-18'),\n  slot_display: $fromAI('slot_display', 'Display time e.g. 09:00 - 09:30 AM'),\n  slot_date: $fromAI('slot_date', 'Date YYYY-MM-DD'),\n  symptoms: $fromAI('symptoms', 'Symptoms or empty string'),\n  specialty_id: $fromAI('specialty_id', 'Specialty ID e.g. spec_gp'),\n  fee_paid: parseFloat($fromAI('fee_paid', 'Consultation fee as number')),\n  status: 'pending',\n  payment_status: 'unpaid'\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.4,
-      "position": [
-        1088,
-        1632
-      ],
-      "id": "225ff87d-27ff-4e9c-bf74-e6e410218815",
-      "name": "create booking1",
-      "credentials": {
-        "supabaseApi": {
-          "id": "3YH2ieK8pl9hK7aT",
-          "name": "Supabase account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "toolDescription": "cancel_booking: Cancels a booking by setting status to cancelled. Matches by booking_ref AND the patient's phone number for security. Also handles pending bookings.",
-        "method": "PATCH",
-        "url": "={{ 'https://kcaykydhganhxuwnvubs.supabase.co/rest/v1/bookings?booking_ref=eq.' + $fromAI('booking_ref', 'Booking reference e.g. LYN100001') + '&phone=eq.' + $('Ingest Message1').first().json.phone + '&status=in.(confirmed,pending)' }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  status: 'cancelled',\n  cancelled_at: new Date().toISOString(),\n  cancellation_reason: $fromAI('cancellation_reason', 'Reason for cancellation')\n}) }}",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequestTool",
-      "typeVersion": 4.4,
-      "position": [
-        1248,
-        1632
-      ],
-      "id": "44067f74-4af3-4f59-817c-305c0c1d025f",
-      "name": "cancel booking1",
-      "credentials": {
-        "supabaseApi": {
-          "id": "3YH2ieK8pl9hK7aT",
-          "name": "Supabase account"
-        }
-      }
+      "id": "750c58cc-31d6-4773-87c4-f7ef1fee54c8",
+      "name": "Send WhatsApp"
     }
   ],
   "connections": {
-    "Save User Message": {
+    "Webhook": {
       "main": [
         [
           {
-            "node": "Load Session1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "get specialties": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent1",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "reschedule booking": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent1",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Webhook POST (Incoming Messages)1": {
-      "main": [
-        [
-          {
-            "node": "Ingest Message1",
+            "node": "Ingest Message",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Respond1",
+            "node": "Respond OK",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Ingest Message1": {
+    "Ingest Message": {
       "main": [
         [
           {
@@ -594,166 +485,166 @@
         ]
       ]
     },
-    "Load Session1": {
+    "Save User Message": {
       "main": [
         [
           {
-            "node": "Load Convo1",
+            "node": "Load Session",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Load Convo1": {
+    "Load Session": {
       "main": [
         [
           {
-            "node": "Context1",
+            "node": "Load Convo",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Context1": {
+    "Load Convo": {
       "main": [
         [
           {
-            "node": "AI Agent1",
+            "node": "Context Builder",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "AI Agent1": {
+    "Context Builder": {
       "main": [
         [
           {
-            "node": "Response1",
+            "node": "AI Agent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Google Gemini Chat Model1": {
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
       "ai_languageModel": [
         [
           {
-            "node": "AI Agent1",
+            "node": "AI Agent",
             "type": "ai_languageModel",
             "index": 0
           }
         ]
       ]
     },
-    "Response1": {
-      "main": [
-        [
-          {
-            "node": "Save AI Message1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Save AI Message1": {
-      "main": [
-        [
-          {
-            "node": "Session Payload1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Session Payload1": {
-      "main": [
-        [
-          {
-            "node": "Upsert Session1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upsert Session1": {
-      "main": [
-        [
-          {
-            "node": "Render Format to WA1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Render Format to WA1": {
-      "main": [
-        [
-          {
-            "node": "Send Message1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "get doctors1": {
+    "get_specialties": {
       "ai_tool": [
         [
           {
-            "node": "AI Agent1",
+            "node": "AI Agent",
             "type": "ai_tool",
             "index": 0
           }
         ]
       ]
     },
-    "get slots1": {
+    "get_bookings": {
       "ai_tool": [
         [
           {
-            "node": "AI Agent1",
+            "node": "AI Agent",
             "type": "ai_tool",
             "index": 0
           }
         ]
       ]
     },
-    "get bookings1": {
+    "create_booking_request": {
       "ai_tool": [
         [
           {
-            "node": "AI Agent1",
+            "node": "AI Agent",
             "type": "ai_tool",
             "index": 0
           }
         ]
       ]
     },
-    "create booking1": {
+    "cancel_booking": {
       "ai_tool": [
         [
           {
-            "node": "AI Agent1",
+            "node": "AI Agent",
             "type": "ai_tool",
             "index": 0
           }
         ]
       ]
     },
-    "cancel booking1": {
-      "ai_tool": [
+    "Parse Response": {
+      "main": [
         [
           {
-            "node": "AI Agent1",
-            "type": "ai_tool",
+            "node": "Save AI Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save AI Message": {
+      "main": [
+        [
+          {
+            "node": "Session Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Session Payload": {
+      "main": [
+        [
+          {
+            "node": "Upsert Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Session": {
+      "main": [
+        [
+          {
+            "node": "Render to WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render to WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Send WhatsApp",
+            "type": "main",
             "index": 0
           }
         ]
@@ -761,26 +652,26 @@
     }
   },
   "pinData": {
-    "Webhook POST (Incoming Messages)1": [
+    "Webhook": [
       {
         "headers": {
           "host": "n8n.serveasie.in",
           "user-agent": "facebookexternalua",
-          "content-length": "491",
+          "content-length": "675",
           "accept": "*/*",
           "accept-encoding": "gzip, br",
           "cdn-loop": "cloudflare; loops=1",
-          "cf-connecting-ip": "2a03:2880:12ff:2::",
+          "cf-connecting-ip": "2a03:2880:22ff:8::",
           "cf-ipcountry": "US",
-          "cf-ray": "9dea481d0f10c0f4-DFW",
+          "cf-ray": "9e79350b6ce47d61-IAD",
           "cf-visitor": "{\"scheme\":\"https\"}",
-          "cf-warp-tag-id": "8f3e87a8-3233-471b-9935-53628bdd43bc",
+          "cf-warp-tag-id": "2245cd6b-e056-4aea-9cd7-13a1a94a59a1",
           "connection": "keep-alive",
           "content-type": "application/json",
-          "x-forwarded-for": "2a03:2880:12ff:2::",
+          "x-forwarded-for": "2a03:2880:22ff:8::",
           "x-forwarded-proto": "https",
-          "x-hub-signature": "sha1=79ca271fd8d3c292999e5d488710849c3e122cc3",
-          "x-hub-signature-256": "sha256=477f14800624d577edf8c38dbc43bf778b12fea8d2c138247f6e87d416286a31"
+          "x-hub-signature": "sha1=621744da45ef4b4156f135a92feb1e9f1c7006d9",
+          "x-hub-signature-256": "sha256=8ad358811925b7504e67e4bddfa986ab7e66e9ac24a18c740aadd59cf6cee148"
         },
         "params": {},
         "query": {},
@@ -807,13 +698,21 @@
                     ],
                     "messages": [
                       {
-                        "from": "919391177282",
-                        "id": "wamid.HBgMOTE5MzkxMTc3MjgyFQIAEhggQUM3QjI0Njk4MTVDRThEQ0VFOTFGMkNFNjlBREZEM0QA",
-                        "timestamp": "1773900286",
-                        "text": {
-                          "body": "18"
+                        "context": {
+                          "from": "15551515931",
+                          "id": "wamid.HBgMOTE5MzkxMTc3MjgyFQIAERgSMUZGMkM5MEFBRDk4QkFGMTcyAA=="
                         },
-                        "type": "text"
+                        "from": "919391177282",
+                        "id": "wamid.HBgMOTE5MzkxMTc3MjgyFQIAEhggQUMzQ0JFQkIzMTJDRTYxOTMxNTlDMDcyMjlCNjBCQUMA",
+                        "timestamp": "1775398969",
+                        "type": "interactive",
+                        "interactive": {
+                          "type": "button_reply",
+                          "button_reply": {
+                            "id": "btn_book",
+                            "title": "Book a Doctor"
+                          }
+                        }
                       }
                     ]
                   },
@@ -829,7 +728,6 @@
     ]
   },
   "meta": {
-    "templateCredsSetupCompleted": true,
     "instanceId": "dad38cc4d0ffa3ec724669af567ba3a39a57c51495bbd03f0149bbf35fa212dc"
   }
 }
