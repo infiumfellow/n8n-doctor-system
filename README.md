@@ -2,7 +2,7 @@
 
 This is a WhatsApp-based healthcare booking system built using n8n, Supabase, and AI.
 
-The goal is simple. A patient can message on WhatsApp, describe their problem, and book a doctor for home visit without confusion.
+The goal is simple. A patient can message on WhatsApp, describe their problem, and book a doctor for a home visit without confusion.
 
 ---
 
@@ -19,12 +19,21 @@ Just like Uber but for doctors.
 
 ---
 
+## 🖼️ Workflow
+
+Below is the n8n workflow used to power the automation:
+
+![n8n Workflow](./workflow.png)
+
+
+---
+
 ## ⚙️ Features
 
 - WhatsApp chatbot flow  
 - Smart symptom understanding  
 - Auto doctor specialty detection  
-- Step by step booking flow  
+- Step-by-step booking flow  
 - Booking confirmation and tracking  
 - Cancel booking option  
 - Session memory using database  
@@ -34,7 +43,7 @@ Just like Uber but for doctors.
 
 ## 🧠 AI Behaviour
 
-- Talks in simple and friendly way  
+- Talks in a simple and friendly way  
 - Does not repeat questions  
 - Supports buttons and text replies  
 - Detects emergency cases  
@@ -61,10 +70,10 @@ Just like Uber but for doctors.
    - Generates response  
 
 5. **Tools**
-   - get_specialties  
-   - create_booking_request  
-   - get_bookings  
-   - cancel_booking  
+   - `get_specialties`  
+   - `create_booking_request`  
+   - `get_bookings`  
+   - `cancel_booking`  
 
 6. **Response Formatter**  
    Converts AI output into WhatsApp format  
@@ -99,10 +108,10 @@ Just like Uber but for doctors.
 
 ## 💡 Example
 
-User: `Fever and headache`  
-Bot: Asks details  
-User: Gives info  
-Bot: Books doctor  
+**User:** `Fever and headache`  
+**Bot:** Asks details  
+**User:** Gives info  
+**Bot:** Books doctor  
 
 ---
 
