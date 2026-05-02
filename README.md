@@ -1,217 +1,120 @@
-# 🏥 WhatsApp AI Medical Booking Bot (n8n + Supabase + Gemini)
+# 🏥 WhatsApp Healthcare Automation
 
-An end-to-end **AI-powered WhatsApp chatbot** built using **n8n**, **Google Gemini**, and **Supabase** that allows patients to:
+This is a WhatsApp-based healthcare booking system built using n8n, Supabase, and AI.
 
-- Book doctor appointments  
-- View & manage bookings  
-- Reschedule or cancel appointments  
-- Chat naturally using AI  
+The goal is simple. A patient can message on WhatsApp, describe their problem, and book a doctor for home visit without confusion.
 
 ---
 
-## 🚀 Features
+## 🚀 What this system does
 
-- 📱 WhatsApp webhook integration  
-- 🤖 AI-powered conversation (Google Gemini)  
-- 🧠 Context-aware chat with memory  
-- 🗂️ Structured booking flow (name, age, symptoms, etc.)  
-- 🩺 Specialty → Doctor → Slot selection  
-- 🔁 Reschedule & cancel bookings  
-- 💾 Persistent storage using Supabase  
-- ⚡ Deduplication & rate limiting  
-- 🎯 Smart intent detection  
+- Patient sends message on WhatsApp  
+- AI chats and collects details step by step  
+- System creates a booking request  
+- Nearby doctors get notified  
+- First doctor who accepts gets the booking  
+- Patient gets confirmation on WhatsApp  
+
+Just like Uber but for doctors.
 
 ---
 
-## 🧩 Workflow Overview
+## ⚙️ Features
 
-This n8n workflow processes incoming WhatsApp messages and responds intelligently.
+- WhatsApp chatbot flow  
+- Smart symptom understanding  
+- Auto doctor specialty detection  
+- Step by step booking flow  
+- Booking confirmation and tracking  
+- Cancel booking option  
+- Session memory using database  
+- Rate limit and duplicate handling  
 
-### 🔄 Flow Breakdown
+---
 
-1. **Webhook Trigger**
-   - Receives incoming WhatsApp messages
+## 🧠 AI Behaviour
 
-2. **Message Ingestion**
-   - Deduplicates messages  
-   - Applies rate limiting  
-   - Parses text, buttons, lists, location  
+- Talks in simple and friendly way  
+- Does not repeat questions  
+- Supports buttons and text replies  
+- Detects emergency cases  
+- Allows booking for family members  
 
-3. **Database Logging**
-   - Saves user messages to Supabase  
+---
 
-4. **Session + History**
-   - Loads session state  
-   - Loads recent conversation  
+## 🗂️ Workflow Overview
 
-5. **Context Builder**
-   - Builds structured prompt for AI  
-   - Tracks booking progress  
+1. **Webhook**  
+   Receives WhatsApp messages  
 
-6. **AI Agent (Gemini)**
+2. **Ingest Message**  
+   Extracts user message, buttons, location  
+
+3. **Database (Supabase)**  
+   - Stores messages  
+   - Stores session state  
+   - Stores bookings  
+
+4. **AI Agent**  
+   - Understands input  
+   - Decides next step  
    - Generates response  
-   - Calls tools (doctors, slots, bookings)
 
-7. **Response Parser**
-   - Validates AI output  
-   - Handles truncation safely  
+5. **Tools**
+   - get_specialties  
+   - create_booking_request  
+   - get_bookings  
+   - cancel_booking  
 
-8. **Session Update**
-   - Updates booking draft  
-   - Tracks intent & progress  
+6. **Response Formatter**  
+   Converts AI output into WhatsApp format  
 
-9. **WhatsApp Formatter**
-   - Converts response to:
-     - Text  
-     - Buttons  
-     - List messages  
-
-10. **Send Message**
-   - Sends response via WhatsApp Cloud API  
+7. **Send WhatsApp**  
+   Sends response back to user  
 
 ---
 
-## 🛠️ Tools (AI Functions)
-
-The AI agent can call these tools dynamically:
-
-- `get_specialties` → Fetch medical specialties  
-- `get_doctors` → Get doctors by specialty & pincode  
-- `get_slots` → Available appointment slots  
-- `create_booking` → Book appointment  
-- `get_bookings` → Fetch user bookings  
-- `reschedule_booking` → Change slot  
-- `cancel_booking` → Cancel booking  
-
----
-
-## 🗄️ Database (Supabase)
-
-Used tables/views:
-
-- `conversation_messages` → chat history  
-- `session_state` → user session & draft  
-- `bookings` → appointment data  
-- `v_doctor_search` → doctor listing  
-- `v_available_slots` → available slots  
-- `v_recent_conversation` → chat context  
-
----
-
-## ⚙️ Setup Instructions
-
-### 1. Import Workflow
-- Import the provided JSON into n8n
-
----
-
-### 2. Configure Credentials
-
-#### 🔐 Supabase
-- Add Supabase API credentials in n8n
-- Replace:
-  - `apikey`
-  - `Authorization`
-
-#### 🤖 Google Gemini
-- Add Google Gemini API key  
-- Connect to **AI Agent node**
-
-#### 📱 WhatsApp Cloud API
-- Set:
-  - `phone_number_id`
-  - `Bearer Token`
-
----
-
-### 3. Webhook Setup
-
-- Endpoint:
-- - Configure in Meta Developer Dashboard  
-- Verify webhook  
-
----
-
-### 4. Environment Variables (Recommended)
-
-Replace hardcoded secrets with env vars:
-
-- `SUPABASE_URL`
-- `SUPABASE_KEY`
-- `WHATSAPP_TOKEN`
-- `PHONE_NUMBER_ID`
-
----
-
-## 🧠 AI Behavior
-
-The AI:
-
-- Collects patient details step-by-step  
-- Maintains a **booking draft**  
-- Never asks duplicate questions  
-- Uses structured JSON responses  
-- Calls tools when needed  
-
----
-
-## 📦 Example Flow
-User: Hi
-Bot: What would you like to do?
-
-User: Book appointment
-Bot: What is your name?
-
-User: Vamsi
-Bot: Age?
-
-User: 25
-Bot: Symptoms?
-
-User: Fever
-
-→ AI selects specialty
-→ Shows doctors
-→ Shows slots
-→ Confirms booking
-
-
----
-
-## 🔒 Safety Features
-
-- ✅ Deduplication (prevents duplicate messages)  
-- ✅ Rate limiting (1 msg / 1.5 sec)  
-- ✅ JSON validation for AI responses  
-- ✅ Fallback response handling  
-- ✅ Secure booking (phone + booking_ref match)  
-
----
-
-## ⚠️ Important Notes
-
-- Never expose API keys publicly  
-- Move secrets to environment variables  
-- Ensure Supabase RLS policies are configured  
-- WhatsApp API requires approved templates for outbound messages  
-
----
-
-## 📌 Future Improvements
-
-- 💳 Payment integration  
-- 🌍 Multi-language support  
-- 🧑‍⚕️ Doctor availability sync  
-- 📊 Admin dashboard  
-- 📅 Calendar integrations  
-
----
-
-## 🙌 Credits
-
-Built using:
+## 📦 Tech Stack
 
 - n8n  
 - Supabase  
-- Google Gemini  
 - WhatsApp Cloud API  
+- Gemini AI  
+
+---
+
+## 📌 Booking Flow
+
+1. Symptoms  
+2. Pincode  
+3. Date  
+4. Time slot  
+5. Patient name  
+6. Age  
+7. Gender  
+8. Summary  
+9. Confirmation  
+
+---
+
+## 💡 Example
+
+User: `Fever and headache`  
+Bot: Asks details  
+User: Gives info  
+Bot: Books doctor  
+
+---
+
+## 🔒 Notes
+
+- User does not select doctor  
+- System assigns doctor automatically  
+- Works only in supported areas  
+- Emergency cases redirected to helpline  
+
+---
+
+## 🙌 Goal
+
+Make doctor home visits simple and fast using WhatsApp.
